@@ -1,0 +1,175 @@
+pipeline {
+    agent none
+    environment {
+        GIT_REPO = 'https://github.com/fdelgadodyvenia/todo-list-aws.git'
+        BRANCH = 'develop'
+        AWS_REGION = 'us-east-1'
+        STACK_NAME = 'todo-stack'
+        S3_BUCKET = 'aws-sam-cli-managed-default-samclisourcebucket-hgwhprjqmlgt'
+    }
+
+    stages {
+        stage('📥 Get Code') {
+            agent { label 'master' }
+            steps {
+                cleanWs()
+                withCredentials([usernamePassword(credentialsId: 'd579908c-4755-490c-af17-6888c97748fd', usernameVariable: 'GIT_USER', passwordVariable: 'GIT_PASS')]) {
+                    sh """
+                        echo "🔽 Cloning repository"
+                        git clone --branch \$BRANCH https://\$GIT_USER:\$GIT_PASS@${GIT_REPO.replaceFirst('https://', '')}
+                    """
+                }
+                stash name: 'source-code', includes: 'todo-list-aws/**'
+            }
+            post {
+                always {
+                    echo "🧹 Cleaning workspace (master)"
+                    cleanWs()
+                }
+            }
+        }
+
+        stage('🧹 StaticTests') {
+            agent { label 'rest-test' }
+            steps {
+                unstash 'source-code'
+                dir('todo-list-aws/src') {
+                    sh """
+                        python3 -m venv venv
+                        . venv/bin/activate
+
+                        echo "📎 Installing tools"
+                        pip install flake8 flake8-html bandit
+
+                        echo "🧪 Running Flake8"
+                        flake8 . --exit-zero --format=html --htmldir=flake8_html
+
+                        echo "🔒 Running Bandit"
+                        bandit -r . -f html -o bandit_report.html || true
+                    """
+                }
+            }
+            post {
+                always {
+                    echo "📂 Archiving flake8 and bandit reports"
+                    archiveArtifacts artifacts: 'todo-list-aws/src/flake8_html/**, todo-list-aws/src/bandit_report.html', allowEmptyArchive: true
+
+                    publishHTML([
+                        reportDir: 'todo-list-aws/src/flake8_html',
+                        reportFiles: 'index.html',
+                        reportName: 'Flake8 Report',
+                        allowMissing: false,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true
+                    ])
+
+                    publishHTML([
+                        reportDir: 'todo-list-aws/src',
+                        reportFiles: 'bandit_report.html',
+                        reportName: 'Bandit Report',
+                        allowMissing: false,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true
+                    ])
+
+                    echo "🧹 Cleaning workspace (rest-test)"
+                    cleanWs()
+                }
+            }
+        }
+
+        stage('🚀 SAM Deploy') {
+            agent { label 'master' }
+            steps {
+                unstash 'source-code'
+                dir('todo-list-aws') {
+                    sh """
+                        echo "🔧 Building SAM Application"
+                        sam build
+
+                        echo "🚀 Deploying to Staging"
+                        curl -L -o samconfig.toml https://raw.githubusercontent.com/fdelgadodyvenia/todo-list-aws-config/staging/samconfig.toml
+                        
+                        echo "📂 samconfig.toml content:"
+                        cat samconfig.toml
+
+                        sam deploy --config-file samconfig.toml --config-env staging
+                    """
+                    script {
+                        echo "🔍 Fetching BASE_URL from CloudFormation Outputs"
+                        BASE_URL = sh(
+                            script: """
+                                aws cloudformation describe-stacks \
+                                  --stack-name $STACK_NAME \
+                                  --query "Stacks[0].Outputs[?OutputKey=='BaseUrlApi'].OutputValue" \
+                                  --output text --region $AWS_REGION
+                            """,
+                            returnStdout: true
+                        ).trim()
+                        echo "🌐 BASE_URL = ${BASE_URL}"
+                    }
+                }
+            }
+            post {
+                always {
+                    echo "🧹 Cleaning workspace (master)"
+                    cleanWs()
+                }
+            }
+        }
+
+        stage('🧪 RestTest') {
+            agent { label 'rest-test' }
+            steps {
+                unstash 'source-code'
+                dir('todo-list-aws') {
+                    withEnv(["BASE_URL=${BASE_URL}"]){
+                        sh """
+                            echo "🐍 Setting up virtual environment for integration tests"
+                            python3 -m venv venv
+                            . venv/bin/activate
+                            pip install --upgrade pip
+                            pip install -r requirements.txt || pip install pytest requests
+
+                            echo "✅ Running pytest for integration tests"
+                            pytest test/integration/todoApiTest.py --exitfirst --disable-warnings
+                        """
+                    }
+                }
+            }
+            post {
+                always {
+                    echo "🧹 Cleaning workspace (rest-test)"
+                    cleanWs()
+                }
+            }
+        }
+
+        stage('📦 Promote') {
+            agent { label 'master' }
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'd579908c-4755-490c-af17-6888c97748fd', usernameVariable: 'GIT_USER', passwordVariable: 'GIT_PASS')]) {
+                    sh """
+                        echo "📤 Pulling latest code for Promote"
+                        rm -rf todo-list-aws
+                        git clone --branch \$BRANCH https://\$GIT_USER:\$GIT_PASS@${GIT_REPO.replaceFirst('https://', '')}
+                        cd todo-list-aws
+
+                        echo "📤 Promoting code to main"
+                        git config user.name "jenkins"
+                        git config user.email "jenkins@example.com"
+                        git checkout main
+                        git merge \$BRANCH --no-edit
+                        git push https://\$GIT_USER:\$GIT_PASS@${GIT_REPO.replaceFirst('https://', '')} main
+                    """
+                }
+            }
+            post {
+                always {
+                    echo "🧹 Cleaning workspace (master)"
+                    cleanWs()
+                }
+            }
+        }
+    }
+}
