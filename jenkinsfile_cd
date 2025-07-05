@@ -1,5 +1,5 @@
 pipeline {
-    agent any
+    agent none
 
     environment {
         GIT_REPO = 'https://github.com/fdelgadodyvenia/todo-list-aws.git'
@@ -12,6 +12,7 @@ pipeline {
     stages {
 
         stage('📥 Get Code') {
+            agent { label 'master' }
             steps {
                 withCredentials([usernamePassword(credentialsId: 'd579908c-4755-490c-af17-6888c97748fd', usernameVariable: 'GIT_USER', passwordVariable: 'GIT_PASS')]) {
                     sh """
@@ -24,6 +25,7 @@ pipeline {
         }
 
         stage('🚀 Deploy to Production') {
+            agent { label 'master' }
             steps {
                 dir('todo-list-aws') {
                     sh """
@@ -40,14 +42,28 @@ pipeline {
                           --no-fail-on-empty-changeset \
                           --parameter-overrides Stage=production
                     """
+                    script {
+                        echo "🔍 Fetching BASE_URL from CloudFormation Outputs"
+                        BASE_URL = sh(
+                            script: """
+                                aws cloudformation describe-stacks \
+                                  --stack-name $STACK_NAME \
+                                  --query "Stacks[0].Outputs[?OutputKey=='BaseUrlApi'].OutputValue" \
+                                  --output text --region $AWS_REGION
+                            """,
+                            returnStdout: true
+                        ).trim()
+                        echo "🌐 BASE_URL = ${BASE_URL}"
+                    }
                 }
             }
         }
 
         stage('🧪 Rest Test (Read-Only)') {
+            agent { label 'master' }
             steps {
                 dir('todo-list-aws') {
-                    withEnv(["BASE_URL=https://y3789gn804.execute-api.us-east-1.amazonaws.com/Prod"]) {
+                    withEnv(["BASE_URL=${BASE_URL}"]) {
                         sh """
                             echo "🐍 Setting up virtual environment for read-only integration tests"
                             python3 -m venv venv

@@ -84,6 +84,19 @@ pipeline {
                             --no-confirm-changeset \
                             --no-fail-on-empty-changeset
                     """
+                    script {
+                        echo "🔍 Fetching BASE_URL from CloudFormation Outputs"
+                        BASE_URL = sh(
+                            script: """
+                                aws cloudformation describe-stacks \
+                                  --stack-name $STACK_NAME \
+                                  --query "Stacks[0].Outputs[?OutputKey=='BaseUrlApi'].OutputValue" \
+                                  --output text --region $AWS_REGION
+                            """,
+                            returnStdout: true
+                        ).trim()
+                        echo "🌐 BASE_URL = ${BASE_URL}"
+                    }
                 }
             }
         }
@@ -91,7 +104,7 @@ pipeline {
         stage('🧪 RestTest') {
             steps {
                 dir('todo-list-aws') {
-                    withEnv(["BASE_URL=https://y3789gn804.execute-api.us-east-1.amazonaws.com/Prod"]){
+                    withEnv(["BASE_URL=${BASE_URL}"]){
                         sh """
                             echo "🐍 Setting up virtual environment for integration tests"
                             python3 -m venv venv
