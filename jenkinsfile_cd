@@ -1,0 +1,66 @@
+pipeline {
+    agent any
+
+    environment {
+        GIT_REPO = 'https://github.com/fdelgadodyvenia/todo-list-aws.git'
+        BRANCH = 'main'
+        AWS_REGION = 'us-east-1'
+        STACK_NAME = 'todo-stack-prod'
+        S3_BUCKET = 'aws-sam-cli-managed-default-samclisourcebucket-hgwhprjqmlgt'
+    }
+
+    stages {
+
+        stage('📥 Get Code') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'd579908c-4755-490c-af17-6888c97748fd', usernameVariable: 'GIT_USER', passwordVariable: 'GIT_PASS')]) {
+                    sh """
+                        rm -rf todo-list-aws
+                        echo "🔽 Cloning repository from main branch"
+                        git clone --branch \$BRANCH https://\$GIT_USER:\$GIT_PASS@github.com/fdelgadodyvenia/todo-list-aws.git
+                    """
+                }
+            }
+        }
+
+        stage('🚀 Deploy to Production') {
+            steps {
+                dir('todo-list-aws') {
+                    sh """
+                        echo "🔧 Building SAM application for production"
+                        sam build
+
+                        echo "🚀 Deploying to production"
+                        sam deploy \
+                          --stack-name todo-stack-prod \
+                          --region us-east-1 \
+                          --s3-bucket aws-sam-cli-managed-default-samclisourcebucket-hgwhprjqmlgt \
+                          --capabilities CAPABILITY_IAM \
+                          --no-confirm-changeset \
+                          --no-fail-on-empty-changeset \
+                          --parameter-overrides Stage=production
+                    """
+                }
+            }
+        }
+
+        stage('🧪 Rest Test (Read-Only)') {
+            steps {
+                dir('todo-list-aws') {
+                    withEnv(["BASE_URL=https://y3789gn804.execute-api.us-east-1.amazonaws.com/Prod"]) {
+                        sh """
+                            echo "🐍 Setting up virtual environment for read-only integration tests"
+                            python3 -m venv venv
+                            . venv/bin/activate
+                            pip install --upgrade pip
+                            pip install -r requirements.txt || pip install pytest requests
+
+                            echo "✅ Running read-only tests"
+                            pytest test/integration/test_readonly.py --disable-warnings
+                        """
+                    }
+                }
+            }
+        }
+    }
+}

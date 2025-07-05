@@ -1,0 +1,93 @@
+pipeline {
+    agent none
+
+    environment {
+        GIT_REPO = 'https://github.com/fdelgadodyvenia/todo-list-aws.git'
+        BRANCH = 'main'
+        AWS_REGION = 'us-east-1'
+        STACK_NAME = 'todo-stack-prod'
+        S3_BUCKET = 'aws-sam-cli-managed-default-samclisourcebucket-hgwhprjqmlgt'
+    }
+
+    stages {
+        stage('📥 Get Code') {
+            agent { label 'master' }
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'd579908c-4755-490c-af17-6888c97748fd', usernameVariable: 'GIT_USER', passwordVariable: 'GIT_PASS')]) {
+                    sh """
+                        echo "🔽 Cloning repository from main branch"
+                        git clone --branch \$BRANCH https://\$GIT_USER:\$GIT_PASS@github.com/fdelgadodyvenia/todo-list-aws.git
+                    """
+                }
+                stash name: 'source-code', includes: 'todo-list-aws/**'
+            }
+        }
+
+        stage('🚀 SAM Deploy') {
+            agent { label 'master' }
+            steps {
+                unstash 'source-code'
+                dir('todo-list-aws') {
+                    sh """
+                        echo "🔧 Building SAM Application"
+                        sam build
+
+                        echo "🚀 Deploying to Production"
+                        curl -L -o samconfig.toml https://raw.githubusercontent.com/fdelgadodyvenia/todo-list-aws-config/prod/samconfig.toml
+                        
+                        echo "📂 samconfig.toml content:"
+                        cat samconfig.toml
+
+                        sam deploy --config-file samconfig.toml --config-env production
+                    """
+                    script {
+                        echo "🔍 Fetching BASE_URL from CloudFormation Outputs"
+                        BASE_URL = sh(
+                            script: """
+                                aws cloudformation describe-stacks \
+                                  --stack-name $STACK_NAME \
+                                  --query "Stacks[0].Outputs[?OutputKey=='BaseUrlApi'].OutputValue" \
+                                  --output text --region $AWS_REGION
+                            """,
+                            returnStdout: true
+                        ).trim()
+                        echo "🌐 BASE_URL = ${BASE_URL}"
+                    }
+                }
+            }
+            post {
+                always {
+                    echo "🧹 Cleaning workspace (master)"
+                    cleanWs()
+                }
+            }
+        }
+
+        stage('🧪 Rest Test (Read-Only)') {
+            agent { label 'rest-test' }
+            steps {
+                unstash 'source-code'
+                dir('todo-list-aws') {
+                    withEnv(["BASE_URL=${BASE_URL}"]) {
+                        sh """
+                            echo "🐍 Setting up virtual environment for integration tests"
+                            python3 -m venv venv
+                            . venv/bin/activate
+                            pip install --upgrade pip
+                            pip install -r requirements.txt || pip install pytest requests
+
+                            echo "✅ Running pytest for integration tests"
+                            pytest test/integration/test_readonly.py --disable-warnings
+                        """
+                    }
+                }
+            }
+            post {
+                always {
+                    echo "🧹 Cleaning workspace (rest-test)"
+                    cleanWs()
+                }
+            }
+        }
+    }
+}
