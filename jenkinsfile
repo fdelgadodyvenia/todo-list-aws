@@ -1,10 +1,22 @@
-def branch = env.BRANCH_NAME
-echo "🌿 Current branch: ${branch}"
+pipeline {
+    agent any
+    stages {
+        stage('Select Jenkinsfile') {
+            steps {
+                script {
+                    echo "🌿 Branch detected: ${env.BRANCH_NAME}"
 
-if (branch == 'main') {
-    load 'jenkinsfile_agentes_cd'
-} else if (branch == 'develop') {
-    load 'jenkinsfile_agentes_ci'
-} else {
-    error "No Jenkinsfile configured for branch: ${branch}"
+                    if (env.BRANCH_NAME == 'main') {
+                        echo "🚀 Loading Jenkinsfile-production"
+                        load 'Jenkinsfile-production'
+                    } else if (env.BRANCH_NAME == 'develop') {
+                        echo "🚀 Loading Jenkinsfile-staging"
+                        load 'Jenkinsfile-staging'
+                    } else {
+                        error "❌ No Jenkinsfile defined for branch: ${env.BRANCH_NAME}"
+                    }
+                }
+            }
+        }
+    }
 }
