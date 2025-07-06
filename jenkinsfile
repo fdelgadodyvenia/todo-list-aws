@@ -8,10 +8,10 @@ pipeline {
 
                     if (env.BRANCH_NAME == 'main') {
                         echo "🚀 Loading Jenkinsfile-production"
-                        load 'Jenkinsfile-production'
+                        load 'jenkinsfile_agentes_cd'
                     } else if (env.BRANCH_NAME == 'develop') {
                         echo "🚀 Loading Jenkinsfile-staging"
-                        load 'Jenkinsfile-staging'
+                        load 'jenkinsfile_agentes_ci'
                     } else {
                         error "❌ No Jenkinsfile defined for branch: ${env.BRANCH_NAME}"
                     }
