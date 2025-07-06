@@ -1,0 +1,10 @@
+def branch = env.BRANCH_NAME
+echo "🌿 Current branch: ${branch}"
+
+if (branch == 'main') {
+    load 'jenkinsfile_agentes_cd'
+} else if (branch == 'develop') {
+    load 'jenkinsfile_agentes_ci'
+} else {
+    error "No Jenkinsfile configured for branch: ${branch}"
+}
