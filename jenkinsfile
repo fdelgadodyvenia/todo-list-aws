@@ -7,10 +7,10 @@ pipeline {
                     echo "🌿 Branch detected: ${env.BRANCH_NAME}"
 
                     if (env.BRANCH_NAME == 'main') {
-                        echo "🚀 Loading Jenkinsfile-production"
+                        echo "🚀 Loading jenkinsfile_agentes_cd"
                         load 'jenkinsfile_agentes_cd'
                     } else if (env.BRANCH_NAME == 'develop') {
-                        echo "🚀 Loading Jenkinsfile-staging"
+                        echo "🚀 Loading jenkinsfile_agentes_ci"
                         load 'jenkinsfile_agentes_ci'
                     } else {
                         error "❌ No Jenkinsfile defined for branch: ${env.BRANCH_NAME}"
